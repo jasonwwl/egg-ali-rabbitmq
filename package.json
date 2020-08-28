@@ -1,6 +1,6 @@
 {
   "name": "egg-ali-rabbitmq",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "",
   "eggPlugin": {
     "name": "rabbitmq"
@@ -44,9 +44,9 @@
     "build": "tsc -p tsconfig.json"
   },
   "files": [
-    "dist/**/*"
+    "dist/**/*",
+    "index.d.ts"
   ],
-  "types": "index.d.ts",
   "ci": {
     "version": "8, 10"
   },
