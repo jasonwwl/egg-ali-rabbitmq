@@ -5,7 +5,7 @@ node_js:
 install:
   - yarn
 script:
-  - npm build
+  - yarn build
   - cp index.d.ts dist/
 # after_script:
   # - npminstall codecov && codecov
