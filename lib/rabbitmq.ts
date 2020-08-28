@@ -2,7 +2,7 @@ import { createHmac } from 'crypto';
 import { Application } from 'egg';
 import { connect } from 'amqplib';
 import { stringify } from 'querystring';
-import { EggAliRabbitMQConfig } from 'config/config.default';
+import { EggAliRabbitMQConfig } from '../config/config.default';
 
 export function getUsername(accessKeyId: string, instance: string, securityToken?: string): string {
   const ACCESS_FROM_USER = 0;

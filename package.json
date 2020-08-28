@@ -1,6 +1,6 @@
 {
   "name": "egg-ali-rabbitmq",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "",
   "eggPlugin": {
     "name": "rabbitmq"
@@ -18,6 +18,13 @@
   "dependencies": {
     "amqplib": "^0.6.0"
   },
+  "files": [
+    "index.d.ts",
+    "config",
+    "app.js",
+    "app.ts",
+    "lib"
+  ],
   "devDependencies": {
     "@types/amqplib": "^0.5.13",
     "autod": "^3.0.1",
@@ -43,10 +50,6 @@
     "autod": "autod",
     "build": "tsc -p tsconfig.json"
   },
-  "files": [
-    "dist/**/*",
-    "index.d.ts"
-  ],
   "ci": {
     "version": "8, 10"
   },

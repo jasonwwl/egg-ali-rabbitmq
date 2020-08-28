@@ -21,13 +21,11 @@
     "skipDefaultLibCheck": true,
     "inlineSourceMap": true,
     "importHelpers": true,
-    "baseUrl": ".",
-    "outDir": "./dist",
     "declaration": true,
+    "declarationMap": true,
     "composite": true
   },
   "exclude": [
     "node_modules*",
-    "dist"
   ]
 }

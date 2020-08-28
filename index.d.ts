@@ -1,12 +1,12 @@
-import { EggAliRabbitMQConfig } from 'config/config.default';
+import { EggAliRabbitMQConfig } from './config/config.default';
 
 declare module 'egg' {
   interface EggAppConfig {
-    aliRabbitmq: EggAliRabbitMQConfig;
+    rabbitmq: EggAliRabbitMQConfig;
   }
 
   interface Application {
-
+    rabbit: string;
   }
 
   interface Context {

@@ -7,3 +7,10 @@ run/
 .DS_Store
 *.swp
 dist/
+
+*.js
+*.d.ts
+*.d.ts.map
+*.tsbuildinfo
+!index.d.ts
+!test/
