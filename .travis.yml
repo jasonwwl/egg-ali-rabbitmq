@@ -2,10 +2,8 @@
 language: node_js
 node_js:
   - '12'
-before_install:
-  - yarn
 install:
-  - npminstall
+  - yarn
 script:
   - npm build
   - cp index.d.ts dist/
