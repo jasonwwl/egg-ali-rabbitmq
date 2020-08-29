@@ -6,6 +6,7 @@ export interface EggAliRabbitMQConfig {
   accessKeySecret: string;
   securityToken?: string;
   instance: string;
+  isConfirmChannel?: boolean;
   options?: {
     [k: string]: any;
   };
@@ -16,12 +17,13 @@ export interface EggAliRabbitMQConfig {
 //  * @member Config#aliRabbitmq
 //  * @property {String} SOME_KEY - some description
 //  */
-export const rabbitmq = {
+export const rabbitmq: EggAliRabbitMQConfig = {
   url: '',
   vhost: '',
   accessKeyId: '',
   accessKeySecret: '',
   securityToken: '',
   instance: '',
+  isConfirmChannel: true,
   options: {},
 };

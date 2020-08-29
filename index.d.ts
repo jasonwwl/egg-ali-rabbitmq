@@ -1,4 +1,5 @@
 import { EggAliRabbitMQConfig } from './config/config.default';
+import { RabbitMQProducer } from './lib/rabbitmq';
 
 declare module 'egg' {
   interface EggAppConfig {
@@ -6,7 +7,7 @@ declare module 'egg' {
   }
 
   interface Application {
-    rabbit: string;
+    rabbitmq: RabbitMQProducer;
   }
 
   interface Context {

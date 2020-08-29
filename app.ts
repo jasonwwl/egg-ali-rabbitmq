@@ -1,6 +1,8 @@
-import { Application, IBoot } from 'egg';
-import { join } from 'path';
-
+import { Application, IBoot, EggAppConfig } from 'egg';
+// import { join } from 'path';
+import { createConnection, RabbitMQProducer, loadConsumers } from './lib/rabbitmq';
+import { Connection } from 'amqplib';
+let conn: Connection;
 export default class AppBoot implements IBoot {
   // eslint-disable-next-line no-useless-constructor
   constructor(private readonly app: Application) {}
@@ -18,12 +20,16 @@ export default class AppBoot implements IBoot {
   async didLoad() {
     // 所有的配置已经加载完毕
     // 可以用来加载应用自定义的文件，启动自定义的服务
-    console.log('axxxxx');
-    this.app.loader.loadToApp(join(this.app.config.baseDir, 'app/mq'), 'mq', {
-      initializer: (Cls: any) => {
-        return new Cls(this.app);
-      },
-    });
+    if (this.app.config.rabbitmq) {
+      conn = await createConnection(this.app.config.rabbitmq, this.app);
+      this.app.addSingleton('rabbitmq', async (config: EggAppConfig, app: Application) => {
+        const producer = new RabbitMQProducer(app, conn, {
+          confirmChannel: config.rabbitmq.isConfirmChannel,
+        });
+        await producer.initChannel();
+        return producer;
+      });
+    }
   }
 
 
@@ -32,6 +38,7 @@ export default class AppBoot implements IBoot {
   }
 
   async didReady() {
+    loadConsumers(this.app, conn);
     // Worker is ready, can do some things
     // don't need to block the app boot.
   }
@@ -42,6 +49,9 @@ export default class AppBoot implements IBoot {
 
   async beforeClose() {
     // Do some thing before app close.
+    if (conn) {
+      await conn.close();
+    }
   }
 
 }
