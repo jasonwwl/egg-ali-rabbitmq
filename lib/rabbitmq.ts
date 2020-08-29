@@ -1,11 +1,12 @@
-import { createHmac } from 'crypto';
 import { Application } from 'egg';
 import { connect, Connection, Channel, ConfirmChannel, Options, ConsumeMessage } from 'amqplib';
 import { stringify } from 'querystring';
 import { EggAliRabbitMQConfig } from '../config/config.default';
 import { join } from 'path';
+import { getUsername, getPassword, filterURLSecret } from './util';
+import { EventEmitter } from 'events';
 
-export interface IRabbitMQOptions {
+export interface IRabbitMQProducerOptions {
   confirmChannel?: boolean;
 }
 
@@ -16,49 +17,17 @@ export interface IRabbitMQPublishPayload {
   options?: Options.Publish;
 }
 
+
+type ConsumerHandler = (msg: RabbitMQConsumeMsg) => Promise<boolean>
+
 export interface IRabbitMQConsumeOptions {
-  prefetch?: number;
+  consumerName: string;
   queueName: string;
+  prefetch?: number;
   options?: Options.Consume;
+  handler: ConsumerHandler;
 }
 
-export class BaseRabbitMQ {
-  public channel: Channel | ConfirmChannel
-
-  // eslint-disable-next-line no-useless-constructor
-  constructor(public eggApp: Application, public conn: Connection, public options: IRabbitMQOptions) {}
-
-  async createChannel() {
-    this.channel = this.options.confirmChannel ? await this.conn.createConfirmChannel() : await this.conn.createChannel();
-  }
-
-  async initChannel() {
-    await this.createChannel();
-  }
-}
-export class RabbitMQProducer extends BaseRabbitMQ {
-  async publish(payload: IRabbitMQPublishPayload) {
-    const { exchange, routingKey, message, options } = payload;
-    return new Promise((resolve, reject) => {
-      if (this.options.confirmChannel) {
-        this.channel.publish(exchange, routingKey, Buffer.from(JSON.stringify(message)), options, err => {
-          if (err) {
-            reject(err);
-            return null;
-          }
-          resolve(true);
-        });
-      } else {
-        const res = this.channel.publish(exchange, routingKey, Buffer.from(JSON.stringify(message)));
-        if (res) {
-          resolve(true);
-        } else {
-          reject(new Error('publish result return false'));
-        }
-      }
-    });
-  }
-}
 
 export class RabbitMQConsumeMsg {
   // eslint-disable-next-line no-useless-constructor
@@ -94,24 +63,207 @@ export class RabbitMQConsumeMsg {
   }
 
 }
+export class RabbitMQ extends EventEmitter {
+  private RECONNECT_INTERVAL_MS = 1000
 
-export class RabbitMQConsumer extends BaseRabbitMQ {
-  public consumerTag: string | null
-  async consume(options: IRabbitMQConsumeOptions, fn: BaseHandler['handler']) {
-    const channel = await this.conn.createChannel();
-    channel.prefetch(options.prefetch || 1);
-    const resp = await channel.consume(options.queueName, async msg => {
-      if (msg) {
-        try {
-          await fn(new RabbitMQConsumeMsg(channel, msg));
-        } catch (e) {
-          this.eggApp.coreLogger.error('[egg-ali-rocketmq] consumer error! queue: %s, errmsg: %s, stack:%s', options.queueName, e.message, e.stack);
+  private RECREATE_CHANNEL_INTERVAL_MS = 1000
+
+  public connection: Connection | null
+
+  private reconnectTimer: any
+
+  public channelPool: {
+    [name: string]: {
+      channel: Channel | ConfirmChannel;
+      name: string;
+      reconnectTimer?: any;
+      consumer?: IRabbitMQConsumeOptions;
+    };
+  } = {}
+
+  public producerChannelType: 'normal' | 'confirm'
+
+  constructor(protected config: EggAliRabbitMQConfig) {
+    super();
+  }
+
+  async connect(reconnect?: boolean) {
+    const config = this.config;
+    const username = getUsername(config.accessKeyId, config.instance, config.securityToken);
+    const password = getPassword(config.accessKeySecret);
+    const queryString = config.options ? `?${stringify(config.options)}` : '';
+    const url = `amqp://${username}:${password}@${config.url}/${config.vhost}${queryString}`;
+    try {
+      this.emit(reconnect ? 'reconnecting' : 'connecting', filterURLSecret(url, [ username, password ]));
+      this.connection = await connect(url);
+      this.emit('connected', { connection: this.connection, url: filterURLSecret(url, [ username, password ]) });
+      this.connection.on('blocked', info => this.emit('blocked', info));
+      this.connection.on('unblocked', info => this.emit('unblocked', info));
+      this.connection.on('error', err => this.emit('error', err));
+      this.connection.once('close', async err => {
+        this.emit('close', err);
+        this.reconnect();
+      });
+    } catch (e) {
+      if (reconnect !== true) {
+        throw e;
+      }
+      this.reconnect();
+    }
+  }
+
+  async reconnect() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
+    await this.close();
+    this.reconnectTimer = setTimeout(() => {
+      this.connect(true);
+    }, this.RECONNECT_INTERVAL_MS);
+  }
+
+  async close() {
+    if (!this.connection) {
+      return;
+    }
+    try {
+      await this.connection.close();
+    } catch (e) {
+      this.emit('close_error', e);
+    } finally {
+      this.connection = null;
+    }
+  }
+
+  async createChannel(
+    channelName: string,
+    options?: {confirm?: boolean; consumerOptions?: IRabbitMQConsumeOptions},
+    reCreate?: boolean
+  ) {
+    try {
+      if (!this.connection) {
+        throw new Error('create channel error: connection is not ready!');
+      }
+      if (this.channelPool[channelName] && !reCreate) {
+        throw new Error(`create channel error: chainel "${channelName}" is already exists!`);
+      }
+      this.emit(reCreate ? 'ch_reconnecting' : 'ch_connecting', { channelName, options });
+      const channel = options && options.confirm ? await this.connection.createConfirmChannel() : await this.connection.createChannel();
+      this.emit('ch_connected', { channelName, options });
+      channel.once('close', () => {
+        this.emit('ch_close', { channelName, options });
+        this.recreateChannel(channelName, options);
+      });
+
+      channel.on('error', error => {
+        this.emit('ch_error', { channelName, options, error });
+      });
+
+      channel.on('return', msg => {
+        this.emit('ch_return', { channelName, options, msg });
+      });
+
+      channel.on('drain', msg => {
+        this.emit('ch_drain', { channelName, options, msg });
+      });
+
+      this.channelPool[channelName] = {
+        channel,
+        name: channelName,
+        consumer: options && options.consumerOptions,
+      };
+      return channel;
+    } catch (e) {
+      if (reCreate) {
+        this.recreateChannel(channelName, options);
+      }
+      throw reCreate;
+    }
+  }
+
+  async recreateChannel(
+    channelName: string,
+    options?: {confirm?: boolean; consumerOptions?: IRabbitMQConsumeOptions}
+  ) {
+    if (!this.channelPool[channelName]) {
+      return;
+    }
+    if (this.channelPool[channelName].reconnectTimer) {
+      clearTimeout(this.channelPool[channelName].reconnectTimer);
+    }
+    await this.closeChannel(channelName);
+    setTimeout(async () => {
+      try {
+        await this.createChannel(channelName, options, true);
+      } catch (e) {
+        console.error(e);
+      }
+    }, this.RECREATE_CHANNEL_INTERVAL_MS);
+  }
+
+  async closeChannel(channelName: string) {
+    try {
+      const res = this.getChannel(channelName);
+      await res.channel.close();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  getChannel(name: string) {
+    // return this.channelPool[name];
+    if (!this.channelPool[name]) {
+      throw new Error(`channel "${name}" is not exists!`);
+    }
+    return this.channelPool[name];
+  }
+
+  async initProducerChannel(confirm?: boolean) {
+    await this.createChannel('CORE#PRODUCER', { confirm });
+    this.producerChannelType = confirm ? 'confirm' : 'normal';
+  }
+
+  getProducerChannel() {
+    if (!this.channelPool['CORE#PRODUCER']) {
+      throw new Error('producer channel error: channel is not ready!');
+    }
+    return this.channelPool['CORE#PRODUCER'].channel;
+  }
+
+  async publish(payload: IRabbitMQPublishPayload) {
+    const channel = this.getProducerChannel();
+    const { exchange, routingKey, message, options } = payload;
+    return new Promise((resolve, reject) => {
+      if (this.producerChannelType === 'confirm') {
+        channel.publish(exchange, routingKey, Buffer.from(JSON.stringify(message)), options, err => {
+          if (err) {
+            reject(err);
+            return null;
+          }
+          resolve(true);
+        });
+      } else {
+        const res = channel.publish(exchange, routingKey, Buffer.from(JSON.stringify(message)));
+        if (res) {
+          resolve(true);
+        } else {
+          reject(new Error('publish result return false'));
         }
       }
-    }, options.options);
-    this.consumerTag = resp.consumerTag;
+    });
+  }
+
+  async subscribeConsumer(payload: IRabbitMQConsumeOptions, reSub?: boolean) {
+    const channel = await this.createChannel(payload.consumerName, { confirm: false, consumerOptions: payload }, reSub);
+    channel.prefetch(payload.prefetch || 1);
+    channel.consume(payload.queueName, async msg => {
+      if (msg) {
+        await payload.handler(new RabbitMQConsumeMsg(channel, msg));
+      }
+    });
   }
 }
+
 
 export interface ConsumerConfig {
   env?: string[];
@@ -120,6 +272,7 @@ export interface ConsumerConfig {
   queueName: string;
   options?: Options.Consume;
 }
+
 export abstract class BaseHandler {
   // eslint-disable-next-line no-useless-constructor
   constructor(public app: Application) {}
@@ -129,68 +282,23 @@ export abstract class BaseHandler {
   abstract async handler(msg: RabbitMQConsumeMsg): Promise<boolean>
 }
 
-type TypeofBaseHandler = {new(app: Application): BaseHandler}
+type TypeofBaseHandler = { new(app: Application): BaseHandler }
 
-export function getUsername(accessKeyId: string, instance: string, securityToken?: string): string {
-  const ACCESS_FROM_USER = 0;
-  const payload: (number|string)[] = [ ACCESS_FROM_USER, instance, accessKeyId ];
-  if (securityToken) {
-    payload.push(securityToken);
-  }
-  return Buffer.from(payload.join(':')).toString('base64');
-}
-
-export function getPassword(accessKeySecret: string): string {
-  const timestamp = Date.now().toString();
-  const signature = createHmac('sha1', timestamp)
-    .update(accessKeySecret)
-    .digest('hex')
-    .toUpperCase();
-  return Buffer.from(`${signature}:${timestamp}`).toString('base64');
-}
-
-export function filterURLSecret(url: string, secret: string[]) {
-  let secretUrl = url;
-  secret.forEach(v => {
-    secretUrl = secretUrl.replace(new RegExp(v, 'g'), '*secret*');
-  });
-  return secretUrl;
-}
-
-export async function createConnection(config: EggAliRabbitMQConfig, app: Application) {
-  const username = getUsername(config.accessKeyId, config.instance, config.securityToken);
-  const password = getPassword(config.accessKeySecret);
-  const queryString = config.options ? `?${stringify(config.options)}` : '';
-  const url = `amqp://${username}:${password}@${config.url}/${config.vhost}${queryString}`;
-  app.coreLogger.info('[egg-ali-rocketmq] connecting %s', filterURLSecret(url, [ username, password ]));
-  const conn = await connect(url);
-  conn.on('error', err => {
-    app.coreLogger.error('[egg-ali-rocketmq] ', err);
-  });
-  return conn;
-}
-
-export async function loadConsumers(app: Application, conn: Connection) {
-
+export async function loadConsumers(app: Application) {
   app.loader.loadToApp(join(app.baseDir, 'app/consumer'), 'rabbitConsumer', {
     async initializer(Handler: TypeofBaseHandler, opt) {
-      const handler = new Handler(app);
-      if (handler.config.disable !== true) {
-        const consumer = new RabbitMQConsumer(app, conn, {
-          confirmChannel: false,
+      const handlerClass = new Handler(app);
+      if (handlerClass.config.disable !== true) {
+        await app.rabbitmq.subscribeConsumer({
+          queueName: handlerClass.config.queueName,
+          consumerName: opt.pathName,
+          prefetch: handlerClass.config.prefetch,
+          options: handlerClass.config.options,
+          handler: handlerClass.handler,
         });
-        await consumer.initChannel();
-        await consumer.consume(
-          {
-            prefetch: handler.config.prefetch,
-            queueName: handler.config.queueName,
-            options: handler.config.options,
-          },
-          handler.handler
-        );
-        app.coreLogger.info('[egg-ali-rocketmq] subscribe queue "%s" -> "%s"', handler.config.queueName, opt.pathName);
+        app.coreLogger.info('[egg-ali-rocketmq] subscribe queue "%s" -> "%s"', handlerClass.config.queueName, opt.pathName);
       }
-      return handler;
+      return handlerClass;
     },
   });
 }

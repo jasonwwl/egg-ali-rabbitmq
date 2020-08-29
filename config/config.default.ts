@@ -10,6 +10,7 @@ export interface EggAliRabbitMQConfig {
   options?: {
     [k: string]: any;
   };
+  client?: EggAliRabbitMQConfig;
 }
 
 // /**

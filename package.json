@@ -26,7 +26,8 @@
     "config",
     "app.js",
     "app.ts",
-    "lib"
+    "lib",
+    "tsconfig.json"
   ],
   "devDependencies": {
     "@types/amqplib": "^0.5.13",
