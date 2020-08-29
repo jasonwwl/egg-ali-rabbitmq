@@ -6,9 +6,10 @@
 
 [npm-image]: https://img.shields.io/npm/v/egg-ali-rabbitmq.svg?style=flat-square
 [npm-url]: https://npmjs.org/package/egg-ali-rabbitmq
-[travis-image]: https://img.shields.io/travis/jasonwwl/egg-ali-rabbitmq.svg?style=flat-square
+[travis-image]: https://travis-ci.com/jasonwwl/egg-ali-rabbitmq.svg?branch=master
 [travis-url]: https://travis-ci.org/jasonwwl/egg-ali-rabbitmq
 [download-url]: https://npmjs.org/package/egg-ali-rabbitmq
+[download-image]: https://img.shields.io/npm/dm/egg-ali-rabbitmq.svg?style=flat-square
 
 <!--
 Description here.
