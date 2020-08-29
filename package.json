@@ -1,6 +1,6 @@
 {
   "name": "egg-ali-rabbitmq",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "",
   "eggPlugin": {
     "name": "rabbitmq"
@@ -21,6 +21,8 @@
   },
   "files": [
     "index.d.ts",
+    "main.js",
+    "main.ts",
     "config",
     "app.js",
     "app.ts",
