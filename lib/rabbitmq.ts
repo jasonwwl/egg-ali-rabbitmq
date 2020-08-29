@@ -66,7 +66,7 @@ export class RabbitMQConsumeMsg {
 export class RabbitMQ extends EventEmitter {
   private RECONNECT_INTERVAL_MS = 1000
 
-  private RECREATE_CHANNEL_INTERVAL_MS = 1000
+  private RECREATE_CHANNEL_INTERVAL_MS = 5000
 
   public connection: Connection | null
 
@@ -194,7 +194,12 @@ export class RabbitMQ extends EventEmitter {
     await this.closeChannel(channelName);
     setTimeout(async () => {
       try {
-        await this.createChannel(channelName, options, true);
+        // await this.createChannel(channelName, options, true);
+        if (options && options.consumerOptions) {
+          this.subscribeConsumer(options.consumerOptions, true);
+        } else {
+          await this.createChannel(channelName, options, true);
+        }
       } catch (e) {
         console.error(e);
       }
