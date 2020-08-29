@@ -1,11 +1,11 @@
 {
   "name": "egg-ali-rabbitmq",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "",
   "eggPlugin": {
     "name": "rabbitmq"
   },
-  "main": "./main.ts",
+  "main": "./main.js",
   "keywords": [
     "egg",
     "eggPlugin",
