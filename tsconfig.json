@@ -23,7 +23,8 @@
     "importHelpers": true,
     "declaration": true,
     "declarationMap": true,
-    "composite": true
+    "composite": true,
+    "outDir": "./dist"
   },
   "exclude": [
     "node_modules*",

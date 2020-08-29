@@ -299,7 +299,7 @@ export async function loadConsumers(app: Application) {
           consumerName: opt.pathName,
           prefetch: handlerClass.config.prefetch,
           options: handlerClass.config.options,
-          handler: handlerClass.handler,
+          handler: handlerClass.handler.bind(handlerClass),
         });
         app.coreLogger.info('[egg-ali-rocketmq] subscribe queue "%s" -> "%s"', handlerClass.config.queueName, opt.pathName);
       }
