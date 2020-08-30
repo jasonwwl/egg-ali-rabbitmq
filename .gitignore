@@ -12,5 +12,4 @@ dist/
 *.d.ts
 *.d.ts.map
 *.tsbuildinfo
-!index.d.ts
 !test/
