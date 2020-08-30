@@ -31,9 +31,13 @@ export interface IRabbitMQConsumeOptions {
 
 export class RabbitMQConsumeMsg {
   // eslint-disable-next-line no-useless-constructor
-  constructor(public channel: Channel, protected msg: ConsumeMessage) {}
+  constructor(public channel: Channel, protected msg: ConsumeMessage) {
+    this.receivedDelayMS = Date.now() - msg.properties.timestamp;
+  }
 
   protected cacheContent: any
+
+  public receivedDelayMS: number
 
   get content() {
     if (!this.cacheContent) {
@@ -81,6 +85,9 @@ export class RabbitMQ extends EventEmitter {
     };
   } = {}
 
+  forceCloseChannel = false
+  forceCloseConnection = false
+
   public producerChannelType: 'normal' | 'confirm'
 
   constructor(protected config: EggAliRabbitMQConfig) {
@@ -88,6 +95,9 @@ export class RabbitMQ extends EventEmitter {
   }
 
   async connect(reconnect?: boolean) {
+    if (this.forceCloseConnection) {
+      return null;
+    }
     const config = this.config;
     const username = getUsername(config.accessKeyId, config.instance, config.securityToken);
     const password = getPassword(config.accessKeySecret);
@@ -140,6 +150,9 @@ export class RabbitMQ extends EventEmitter {
     options?: {confirm?: boolean; consumerOptions?: IRabbitMQConsumeOptions},
     reCreate?: boolean
   ) {
+    if (this.forceCloseChannel) {
+      return;
+    }
     try {
       if (!this.connection) {
         throw new Error('create channel error: connection is not ready!');
@@ -191,7 +204,7 @@ export class RabbitMQ extends EventEmitter {
     if (this.channelPool[channelName].reconnectTimer) {
       clearTimeout(this.channelPool[channelName].reconnectTimer);
     }
-    await this.closeChannel(channelName);
+    await this.closeChannel(this.channelPool[channelName].channel);
     setTimeout(async () => {
       try {
         // await this.createChannel(channelName, options, true);
@@ -206,10 +219,9 @@ export class RabbitMQ extends EventEmitter {
     }, this.RECREATE_CHANNEL_INTERVAL_MS);
   }
 
-  async closeChannel(channelName: string) {
+  async closeChannel(channel: Channel) {
     try {
-      const res = this.getChannel(channelName);
-      await res.channel.close();
+      await channel.close();
     } catch (e) {
       console.error(e);
     }
@@ -238,9 +250,13 @@ export class RabbitMQ extends EventEmitter {
   async publish(payload: IRabbitMQPublishPayload) {
     const channel = this.getProducerChannel();
     const { exchange, routingKey, message, options } = payload;
+    const finalOptions: Options.Publish = {
+      timestamp: Date.now(),
+      ... options,
+    };
     return new Promise((resolve, reject) => {
       if (this.producerChannelType === 'confirm') {
-        channel.publish(exchange, routingKey, Buffer.from(JSON.stringify(message)), options, err => {
+        channel.publish(exchange, routingKey, Buffer.from(JSON.stringify(message)), finalOptions, err => {
           if (err) {
             reject(err);
             return null;
@@ -248,7 +264,7 @@ export class RabbitMQ extends EventEmitter {
           resolve(true);
         });
       } else {
-        const res = channel.publish(exchange, routingKey, Buffer.from(JSON.stringify(message)));
+        const res = channel.publish(exchange, routingKey, Buffer.from(JSON.stringify(message)), finalOptions);
         if (res) {
           resolve(true);
         } else {
@@ -260,12 +276,29 @@ export class RabbitMQ extends EventEmitter {
 
   async subscribeConsumer(payload: IRabbitMQConsumeOptions, reSub?: boolean) {
     const channel = await this.createChannel(payload.consumerName, { confirm: false, consumerOptions: payload }, reSub);
-    channel.prefetch(payload.prefetch || 1);
-    channel.consume(payload.queueName, async msg => {
-      if (msg) {
-        await payload.handler(new RabbitMQConsumeMsg(channel, msg));
-      }
-    });
+    if (channel) {
+      await channel.prefetch(payload.prefetch || 1);
+      await channel.consume(payload.queueName, async msg => {
+        if (msg) {
+          await payload.handler(new RabbitMQConsumeMsg(channel, msg));
+        }
+      });
+    }
+  }
+
+  async destroy() {
+    this.forceCloseChannel = true;
+    this.forceCloseConnection = true;
+    const pormiseArr: any[] = [];
+    for (const k in this.channelPool) {
+      pormiseArr.push(this.closeChannel(this.channelPool[k].channel));
+      delete this.channelPool[k];
+    }
+    try {
+      await Promise.all(pormiseArr);
+    } finally {
+      await this.close();
+    }
   }
 }
 

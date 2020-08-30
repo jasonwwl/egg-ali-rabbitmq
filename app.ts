@@ -1,4 +1,4 @@
-import { Application } from 'egg';
+import { Application, IBoot } from 'egg';
 import { loadConsumers, RabbitMQ } from './lib/rabbitmq';
 import { EggAliRabbitMQConfig } from './config/config.default';
 
@@ -65,17 +65,64 @@ async function createRabbitMQ(config: EggAliRabbitMQConfig, app: Application) {
   await rabbitmq.connect();
   await rabbitmq.initProducerChannel(config.isConfirmChannel || true);
 
-  app.beforeStart(() => {
-    loadConsumers(app);
-  });
+  // app.beforeStart(() => {
+  //   loadConsumers(app);
+  // });
 
   return rabbitmq;
 }
 
-export default (app: Application) => {
-  const config = app.config.rabbitmq;
-  if (!config.client) {
-    app.config.rabbitmq.client = Object.assign({}, config);
+// export default (app: Application) => {
+// const config = app.config.rabbitmq;
+// if (!config.client) {
+//   app.config.rabbitmq.client = Object.assign({}, config);
+// }
+//   app.addSingleton('rabbitmq', createRabbitMQ);
+// };
+
+
+export default class AppBoot implements IBoot {
+  // eslint-disable-next-line no-useless-constructor
+  constructor(private readonly app: Application) {}
+
+  configWillLoad() {
+    // Ready to call configDidLoad,
+    // Config, plugin files are referred,
+    // this is the last chance to modify the config.
   }
-  app.addSingleton('rabbitmq', createRabbitMQ);
-};
+
+  configDidLoad() {
+    // Config, plugin files have loaded.
+    const config = this.app.config.rabbitmq;
+    if (!config.client) {
+      this.app.config.rabbitmq.client = Object.assign({}, config);
+    }
+  }
+
+  async didLoad() {
+    // 所有的配置已经加载完毕
+    // 可以用来加载应用自定义的文件，启动自定义的服务
+    this.app.addSingleton('rabbitmq', createRabbitMQ);
+  }
+
+
+  async willReady() {
+    // All plugins have started, can do some thing before app ready.
+  }
+
+  async didReady() {
+    // Worker is ready, can do some things
+    // don't need to block the app boot.
+    loadConsumers(this.app);
+  }
+
+  async serverDidReady() {
+    // Server is listening.
+  }
+
+  async beforeClose() {
+    // Do some thing before app close.
+    await this.app.rabbitmq.destroy();
+  }
+
+}
